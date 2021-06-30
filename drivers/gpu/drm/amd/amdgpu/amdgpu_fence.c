@@ -486,7 +486,7 @@ int amdgpu_fence_driver_init_ring(struct amdgpu_ring *ring,
 
 		r = drm_sched_init(&ring->sched, &amdgpu_sched_ops,
 				   num_hw_submission, amdgpu_job_hang_limit,
-				   timeout, ring->name);
+				   timeout, NULL, ring->name);
 		if (r) {
 			DRM_ERROR("Failed to create scheduler on ring %s.\n",
 				  ring->name);
@@ -790,4 +790,3 @@ int amdgpu_debugfs_fence_init(struct amdgpu_device *adev)
 	return 0;
 #endif
 }
-
