@@ -1350,19 +1350,20 @@
 	};
 
 	gpu: gpu@fde60000 {
-		compatible = "arm,mali-bifrost";
+		compatible = "rockchip,rk3568-mali", "arm,mali-bifrost";
 		reg = <0x0 0xfde60000 0x0 0x4000>;
 
-		interrupts = <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>,
+		interrupts = <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 41 IRQ_TYPE_LEVEL_HIGH>,
-			     <GIC_SPI 40 IRQ_TYPE_LEVEL_HIGH>;
-		interrupt-names = "GPU", "MMU", "JOB";
+			     <GIC_SPI 39 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "job", "mmu", "gpu";
 
 		upthreshold = <40>;
 		downdifferential = <10>;
 
 		clocks = <&scmi_clk 1>, <&cru CLK_GPU>;
-		clock-names = "clk_mali", "clk_gpu";
+		clock-names = "gpu", "bus";
+		resets = <&cru SRST_GPU>;
 		power-domains = <&power RK3568_PD_GPU>;
 		#cooling-cells = <2>;
 		operating-points-v2 = <&gpu_opp_table>;
