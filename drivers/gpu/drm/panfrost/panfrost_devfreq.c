@@ -137,13 +137,12 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 	 * Set the recommend OPP this will enable and configure the regulator
 	 * if any and will avoid a switch off by regulator_late_cleanup()
 	 */
-	ret = dev_pm_opp_set_opp(dev, opp);
+	ret = dev_pm_opp_set_rate(dev, cur_freq);
+	dev_pm_opp_put(opp);
 	if (ret) {
 		DRM_DEV_ERROR(dev, "Couldn't set recommended OPP\n");
-		return ret;
+		goto err_fini;
 	}
-
-	dev_pm_opp_put(opp);
 
 	devfreq = devm_devfreq_add_device(dev, &panfrost_devfreq_profile,
 					  DEVFREQ_GOV_SIMPLE_ONDEMAND, NULL);
