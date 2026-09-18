@@ -113,6 +113,23 @@ config LEDS_AS3645A
 	  controller. V4L2 flash API is provided as well if
 	  CONFIG_V4L2_FLASH_API is enabled.
 
+config LEDS_AW200XX
+	tristate "LED support for Awinic AW20036/AW20054/AW20072/AW20108"
+	depends on LEDS_CLASS && I2C && OF
+	select REGMAP_I2C
+	help
+	  This option enables support for the Awinic AW200XX LED controllers.
+	  It is a matrix LED driver programmed via an I2C interface. Devices have
+	  a set of individually controlled LEDs and support 3 pattern controllers
+	  for auto breathing or group dimming control. Supported devices:
+	    - AW20036 (3x12) 36 LEDs
+	    - AW20054 (6x9)  54 LEDs
+	    - AW20072 (6x12) 72 LEDs
+	    - AW20108 (9x12) 108 LEDs
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-aw200xx.
+
 config LEDS_AW2013
 	tristate "LED support for Awinic AW2013"
 	depends on LEDS_CLASS && I2C && OF
