@@ -713,7 +713,16 @@ static void fw_err_work_fn(struct work_struct *work)
 	RPU_DEBUG_ROCOVERY("reset\n");
 	hpriv->fw_tear_down_func((void *)hpriv);
 	hpriv->hal_disabled = 1;
-	hpriv->fw_bring_up_func((void *)hpriv);
+	if (hpriv->fw_bring_up_func((void *)hpriv) < 0) {
+		RPU_ERROR_ROCOVERY("%s: fw bring up failed, abort driver load\n",
+				   __func__);
+		hpriv->shutdown = 1;
+		hpriv->fw_error = 1;
+		hpriv->fw_error_processing = 0;
+		if (wifi)
+			wifi->params.fw_loaded = 0;
+		goto unlock_out;
+	}
 
 	// 2. recovery cmds
 	RPU_DEBUG_ROCOVERY("recovery cmds\n");
