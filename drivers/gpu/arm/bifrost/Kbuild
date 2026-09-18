@@ -140,10 +140,10 @@ subdir-ccflags-y += $(ccflags-y)
 #
 # Kernel Modules
 #
-obj-$(CONFIG_MALI_BIFROST) += bifrost_kbase.o
+obj-$(CONFIG_MALI_BIFROST) += mali_kbase.o
 obj-$(CONFIG_MALI_KUTF)    += tests/
 
-bifrost_kbase-y := \
+mali_kbase-y := \
     mali_kbase_cache_policy.o \
     mali_kbase_ccswe.o \
     mali_kbase_mem.o \
@@ -178,21 +178,21 @@ bifrost_kbase-y := \
     mali_kbase_trace_gpu_mem.o \
     mali_kbase_pbha.o
 
-bifrost_kbase-$(CONFIG_DEBUG_FS) += mali_kbase_pbha_debugfs.o
+mali_kbase-$(CONFIG_DEBUG_FS) += mali_kbase_pbha_debugfs.o
 
-bifrost_kbase-$(CONFIG_MALI_CINSTR_GWT) += mali_kbase_gwt.o
+mali_kbase-$(CONFIG_MALI_CINSTR_GWT) += mali_kbase_gwt.o
 
-bifrost_kbase-$(CONFIG_SYNC_FILE) += \
+mali_kbase-$(CONFIG_SYNC_FILE) += \
     mali_kbase_fence_ops.o \
     mali_kbase_sync_file.o \
     mali_kbase_sync_common.o
 
-bifrost_kbase-$(CONFIG_MALI_TRACE_POWER_GPU_WORK_PERIOD) += \
+mali_kbase-$(CONFIG_MALI_TRACE_POWER_GPU_WORK_PERIOD) += \
         mali_power_gpu_work_period_trace.o \
         mali_kbase_gpu_metrics.o
 
 ifneq ($(CONFIG_MALI_CSF_SUPPORT),y)
-    bifrost_kbase-y += \
+    mali_kbase-y += \
         mali_kbase_jm.o \
         mali_kbase_dummy_job_wa.o \
         mali_kbase_debug_job_fault.o \
@@ -203,7 +203,7 @@ ifneq ($(CONFIG_MALI_CSF_SUPPORT),y)
         mali_kbase_js_ctx_attr.o \
         mali_kbase_kinstr_jm.o
 
-    bifrost_kbase-$(CONFIG_SYNC_FILE) += \
+    mali_kbase-$(CONFIG_SYNC_FILE) += \
         mali_kbase_fence_ops.o \
         mali_kbase_fence.o
 endif

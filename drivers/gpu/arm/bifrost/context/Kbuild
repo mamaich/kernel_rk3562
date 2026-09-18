@@ -18,10 +18,10 @@
 #
 #
 
-bifrost_kbase-y += context/mali_kbase_context.o
+mali_kbase-y += context/mali_kbase_context.o
 
 ifeq ($(CONFIG_MALI_CSF_SUPPORT),y)
-    bifrost_kbase-y += context/backend/mali_kbase_context_csf.o
+    mali_kbase-y += context/backend/mali_kbase_context_csf.o
 else
-    bifrost_kbase-y += context/backend/mali_kbase_context_jm.o
+    mali_kbase-y += context/backend/mali_kbase_context_jm.o
 endif

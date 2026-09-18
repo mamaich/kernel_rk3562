@@ -18,5 +18,5 @@
 #
 #
 
-bifrost_kbase-y += \
+mali_kbase-y += \
     csf/ipa_control/mali_kbase_csf_ipa_control.o
