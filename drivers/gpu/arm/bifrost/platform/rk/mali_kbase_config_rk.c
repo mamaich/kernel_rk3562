@@ -33,6 +33,7 @@
 #include <linux/thermal.h>
 #include <soc/rockchip/rockchip_opp_select.h>
 #include <soc/rockchip/rockchip_system_monitor.h>
+#include <soc/rockchip/rk3566t.h>
 
 #include "mali_kbase_config_platform.h"
 #include "mali_kbase_rk.h"
@@ -617,10 +618,19 @@ static const struct of_device_id rockchip_mali_of_match[] = {
 
 int kbase_platform_rk_init_opp_table(struct kbase_device *kbdev)
 {
+	int ret;
+
 	rockchip_get_opp_data(rockchip_mali_of_match, &kbdev->opp_info);
 
-	return rockchip_init_opp_table(kbdev->dev, &kbdev->opp_info,
-				       "gpu_leakage", "mali");
+	ret = rockchip_init_opp_table(kbdev->dev, &kbdev->opp_info,
+				      "gpu_leakage", "mali");
+	if (ret)
+		return ret;
+
+	if (IS_ENABLED(CONFIG_ROCKCHIP_RK3566T))
+		rockchip_rk3566t_adjust_gpu_opps(kbdev->dev);
+
+	return 0;
 }
 
 int kbase_platform_rk_enable_regulator(struct kbase_device *kbdev)
