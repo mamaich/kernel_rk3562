@@ -6,6 +6,7 @@
 #include <linux/devfreq_cooling.h>
 #include <linux/platform_device.h>
 #include <linux/pm_opp.h>
+#include <soc/rockchip/rk3566t.h>
 
 #include "panfrost_device.h"
 #include "panfrost_devfreq.h"
@@ -118,6 +119,9 @@ int panfrost_devfreq_init(struct panfrost_device *pfdev)
 		goto err_fini;
 	}
 	pfdevfreq->opp_of_table_added = true;
+
+	/* Apply the RK3566T ceiling before choosing the initial GPU OPP. */
+	rockchip_rk3566t_adjust_gpu_opps(dev);
 
 	spin_lock_init(&pfdevfreq->lock);
 

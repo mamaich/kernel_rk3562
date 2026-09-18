@@ -141,7 +141,11 @@ EXPORT_SYMBOL_GPL(rockchip_rk3566t_adjust_cpu_opps);
 
 void rockchip_rk3566t_adjust_gpu_opps(struct device *gpu_dev)
 {
-	if (!gpu_dev || gpu_opps_adjusted || !soc_is_rk3566t)
+	if (!gpu_dev || gpu_opps_adjusted)
+		return;
+
+	rk3566t_detect_once();
+	if (!soc_is_rk3566t)
 		return;
 
 	if (dev_pm_opp_get_opp_count(gpu_dev) <= 0)
@@ -185,13 +189,17 @@ static int rk3566t_gpu_bus_notifier(struct notifier_block *nb,
 {
 	struct device *dev = data;
 
-	if (action != BUS_NOTIFY_BOUND_DRIVER)
-		return NOTIFY_OK;
-
 	if (!dev->of_node || !rk3566t_is_gpu_node(dev->of_node))
 		return NOTIFY_OK;
 
-	if (gpu_opps_adjusted)
+	if (action == BUS_NOTIFY_UNBOUND_DRIVER) {
+		cancel_delayed_work(&rk3566t_gpu_work);
+		gpu_opps_adjusted = false;
+		rk3566t_gpu_retries = 0;
+		return NOTIFY_OK;
+	}
+
+	if (action != BUS_NOTIFY_BOUND_DRIVER || gpu_opps_adjusted)
 		return NOTIFY_OK;
 
 	rk3566t_gpu_retries = 0;
