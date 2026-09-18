@@ -25,6 +25,7 @@
 #include "cpufreq-dt.h"
 #ifdef CONFIG_ARCH_ROCKCHIP
 #include "rockchip-cpufreq.h"
+#include <soc/rockchip/rk3566t.h>
 #endif
 
 struct private_data {
@@ -266,6 +267,9 @@ static int dt_cpufreq_early_init(struct device *dev, int cpu)
 	 */
 	if (!dev_pm_opp_of_cpumask_add_table(priv->cpus))
 		priv->have_static_opps = true;
+
+	if (IS_ENABLED(CONFIG_ROCKCHIP_RK3566T))
+		rockchip_rk3566t_adjust_cpu_opps(cpu_dev);
 
 	/*
 	 * The OPP table must be initialized, statically or dynamically, by this

@@ -295,6 +295,18 @@ config RK_MEMBLOCK_PROCFS
 
 source "drivers/soc/rockchip/minidump/Kconfig"
 
+config ROCKCHIP_RK3566T
+	bool "Rockchip RK3566T automatic OPP limiting"
+	default y if ARCH_ROCKCHIP
+	depends on ARCH_ROCKCHIP || COMPILE_TEST
+	depends on NVMEM
+	depends on PM_OPP
+	help
+	  Detect the RK3566T SoC variant via the OTP "performance" field and
+	  remove CPU/GPU OPPs above the RK3566T silicon limits (1416 MHz CPU,
+	  700 MHz GPU). This allows a single rk3566.dtsi OPP table to be shared
+	  across standard RK3566 and RK3566T boards.
+
 endmenu
 
 endif

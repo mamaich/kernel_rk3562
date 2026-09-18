@@ -260,8 +260,8 @@
 
 	cpuinfo {
 		compatible = "rockchip,cpuinfo";
-		nvmem-cells = <&otp_id>, <&otp_cpu_version>, <&cpu_code>;
-		nvmem-cell-names = "id", "cpu-version", "cpu-code";
+		nvmem-cells = <&otp_id>, <&otp_cpu_version>, <&cpu_code>, <&performance>;
+		nvmem-cell-names = "id", "cpu-version", "cpu-code", "performance";
 	};
 
 	display_subsystem: display-subsystem {
@@ -2795,6 +2795,11 @@
 		reset-names = "otp_phy";
 
 		/* Data cells */
+		performance: performance@22 {
+			reg = <0x22 0x1>;
+			bits = <0 4>;
+		};
+
 		cpu_code: cpu-code@2 {
 			reg = <0x02 0x2>;
 		};

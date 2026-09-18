@@ -4,6 +4,7 @@
 #
 obj-$(CONFIG_ROCKCHIP_AMP) += rockchip_amp.o
 obj-$(CONFIG_ROCKCHIP_CPUINFO) += rockchip-cpuinfo.o
+obj-$(CONFIG_ROCKCHIP_RK3566T) += rk3566t.o
 obj-$(CONFIG_ROCKCHIP_CSU) += rockchip_csu.o
 obj-$(CONFIG_ROCKCHIP_DISABLE_UNUSED) += rockchip_disable_unused.o
 obj-$(CONFIG_ROCKCHIP_GRF) += grf.o

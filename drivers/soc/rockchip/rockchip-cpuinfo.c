@@ -20,6 +20,7 @@
 #include <linux/slab.h>
 #include <asm/system_info.h>
 #include <linux/rockchip/cpu.h>
+#include <soc/rockchip/rk3566t.h>
 
 unsigned long rockchip_soc_id;
 EXPORT_SYMBOL(rockchip_soc_id);
@@ -87,6 +88,8 @@ static int rockchip_cpuinfo_probe(struct platform_device *pdev)
 	dev_info(dev, "Serial\t\t: %08x%08x\n",
 		 system_serial_high, system_serial_low);
 #endif
+
+	rockchip_rk3566t_detect_from_cpuinfo(dev);
 
 	return 0;
 }
