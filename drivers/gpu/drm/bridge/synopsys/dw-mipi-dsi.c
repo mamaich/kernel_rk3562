@@ -277,6 +277,12 @@ struct dw_mipi_dsi {
 
 	const struct dw_mipi_dsi_plat_data *plat_data;
 	bool support_psr;
+	/*
+	 * Panel DT "rockchip,dsi-keep-hs-clk-on-lpm": when sending LPM
+	 * commands in video mode, keep PHY_TXREQUESTCLKHS (Rockchip 4.19
+	 * behaviour). Needed for Coolboy H9 AMOLED backlight F0/C1.
+	 */
+	bool keep_hs_clk_on_lpm;
 };
 
 /*
@@ -353,6 +359,12 @@ static int dw_mipi_dsi_host_attach(struct mipi_dsi_host *host,
 		return ret;
 	}
 
+	dsi->keep_hs_clk_on_lpm = false;
+	if (dsi->panel && dsi->panel->dev && dsi->panel->dev->of_node)
+		dsi->keep_hs_clk_on_lpm = of_property_read_bool(
+			dsi->panel->dev->of_node,
+			"rockchip,dsi-keep-hs-clk-on-lpm");
+
 	drm_bridge_add(&dsi->bridge);
 
 	if (pdata->host_ops && pdata->host_ops->attach) {
@@ -411,7 +423,14 @@ static void dw_mipi_message_config(struct dw_mipi_dsi *dsi,
 	ctrl = dsi_read(dsi, DSI_LPCLK_CTRL);
 	if (lpm) {
 		val |= ENABLE_LOW_POWER_CMD;
-		ctrl &= ~PHY_TXREQUESTCLKHS;
+		/*
+		 * Default (mainline): drop PHY_TXREQUESTCLKHS for LPM cmds.
+		 * Optional panel quirk keep_hs_clk_on_lpm: match Rockchip 4.19
+		 * and keep HS clock request so video+LP cmd doesn't blank
+		 * panels like Coolboy H9 AMOLED during backlight updates.
+		 */
+		if (!dsi->keep_hs_clk_on_lpm)
+			ctrl &= ~PHY_TXREQUESTCLKHS;
 	} else {
 		val &= ~ENABLE_LOW_POWER_CMD;
 		ctrl |= PHY_TXREQUESTCLKHS;
