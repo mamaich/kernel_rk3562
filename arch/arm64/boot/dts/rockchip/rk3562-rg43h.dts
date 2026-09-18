@@ -54,7 +54,7 @@
 			    <&gpio1 RK_PD4 GPIO_ACTIVE_LOW>,
 			    <&gpio0 RK_PC5 GPIO_ACTIVE_LOW>,
 			    <&gpio0 RK_PC6 GPIO_ACTIVE_LOW>;
-		key-gpios-map = <0x136 0x220 0x137 0x130
+		key-gpios-map = <0x136 0x220 0x137 0x131
 				 0x13a 0x13b 0x66  0x13d
 				 0x13e>;
 		l2-r2-min-value-mv = <50>;
@@ -86,7 +86,7 @@
 		b-key {
 			label = "b-key";
 			adc-chan = <5>;
-			linux,code = <0x131>;
+			linux,code = <0x130>;
 			press-threshold-microvolt = <600000>;
 		};
 
@@ -276,6 +276,15 @@
 		05 c8 01 11
 		05 14 01 29
 	];
+};
+
+/*
+ * 4.3" 1024x768 landscape panel; override darkos.dtsi portrait 68x121.
+ * Diagonal 109.2 mm @ 4:3 → 87x66 mm.
+ */
+&dsi_panel {
+	width-mm = <87>;
+	height-mm = <66>;
 };
 
 /* Display timing — 1024x768 landscape at ~61 Hz */

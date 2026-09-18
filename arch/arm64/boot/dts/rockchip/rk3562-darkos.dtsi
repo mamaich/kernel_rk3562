@@ -4,7 +4,8 @@
  *
  * Shared device tree include for dArkOS gaming handhelds based on
  * Rockchip RK3562 with RK817 PMIC.  Included by both rk3562-rg52mini.dts
- * (portrait 720x1280 panel) and rk3562-rg43h.dts (landscape 1024x768 panel).
+ * (portrait 720x1280 panel) and rk3562-rg43h.dts / rk3562-rg43v.dts
+ * (landscape 1024x768 panel; V is the vertical shell, same board as H).
  *
  * Per-device DTS files override:
  *   - vcc3v3_lcd_n (gpios, enable-active-*, pinctrl-0)
@@ -548,11 +549,12 @@
 
 &sai1 {
 	status = "okay";
+	/* i2s1m1: HDMI I2S to rk628 — i2s1m0 pins overlap rgb666 to rk628 */
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2s1m0_lrck
-		     &i2s1m0_sclk
-		     &i2s1m0_sdi0
-		     &i2s1m0_sdo0>;
+	pinctrl-0 = <&i2s1m1_mclk
+		     &i2s1m1_sclk
+		     &i2s1m1_lrck
+		     &i2s1m1_sdo0>;
 };
 
 &saradc0 {

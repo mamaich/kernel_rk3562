@@ -12,10 +12,6 @@
 	};
 };
 
-&cpu0_opp_table {
-	/delete-node/ opp-1992000000;
-};
-
 &lpddr4_params {
 	/* freq info, freq_0 is final frequency, unit: MHz */
 	freq_0 = <1056>;
@@ -26,27 +22,58 @@
 	freq_0 = <1056>;
 };
 
+&cpu0_opp_table {
+	opp-1992000000 {
+		status = "disabled";
+	};
+};
+
+&dfi {
+	status = "okay";
+};
+
 &dmc {
-	system-status-freq = <
-		/*system status         freq(KHz)*/
-		SYS_STATUS_NORMAL       780000
-		SYS_STATUS_REBOOT       1056000
-		SYS_STATUS_SUSPEND      324000
-		SYS_STATUS_VIDEO_4K     780000
-		SYS_STATUS_VIDEO_4K_10B 780000
-		SYS_STATUS_BOOST        1056000
-		SYS_STATUS_ISP          1056000
-		SYS_STATUS_PERFORMANCE  1056000
-		SYS_STATUS_DUALVIEW     1056000
-	>;
+	status = "okay";
+	upthreshold = <40>;
+	downdifferential = <20>;
+	center-supply = <&vdd_logic>;
+	/delete-property/ system-status-freq;
 };
 
 &dmc_opp_table {
-	opp-1056000000 {
-		opp-hz = /bits/ 64 <1056000000>;
-		opp-microvolt = <900000>;
+	mbist-vmin = <825000 900000 950000>;
+	nvmem-cells = <&log_leakage>, <&core_pvtm>, <&mbist_vmin>, <&dmc_opp_info>,
+		      <&specification_serial_number>, <&remark_spec_serial_number>;
+	nvmem-cell-names = "leakage", "pvtm", "mbist-vmin", "opp-info",
+			   "specification_serial_number", "remark_spec_serial_number";
+	rockchip,supported-hw;
+	rockchip,max-volt = <1000000>;
+	rockchip,low-temp-adjust-volt = <
+		0 1560 75000
+	>;
+	rockchip,leakage-voltage-sel = <
+		1 80 0
+		81 254 1
+	>;
+	rockchip,pvtm-voltage-sel = <
+		0     84000 0
+		84001 100000 1
+	>;
+	rockchip,pvtm-ch = <0 5>;
+
+	opp-1560000000 {
+		opp-supported-hw = <0xf9 0xffff>;
+		opp-hz = /bits/ 64 <1560000000>;
+		opp-microvolt = <900000 900000 1000000>;
+		opp-microvolt-L0 = <900000 900000 1000000>;
+		opp-microvolt-L1 = <875000 875000 1000000>;
 	};
-	/delete-node/ opp-1560000000;
+
+	opp-j-m-1560000000 {
+		opp-supported-hw = <0x06 0xffff>;
+		opp-hz = /bits/ 64 <1560000000>;
+		opp-microvolt = <875000 875000 1000000>;
+	};
 };
 
 &power {
