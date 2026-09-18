@@ -304,6 +304,9 @@ struct rk817_charger {
 	struct delayed_work host_work;
 	struct delayed_work discnt_work;
 	struct delayed_work irq_work;
+	struct delayed_work plug_poll_work;
+	int last_plug_in_sts;
+	bool charger_use_pmic_plug;
 	struct notifier_block bc_nb;
 	struct notifier_block cable_cg_nb;
 	struct notifier_block cable_host_nb;
@@ -1473,6 +1476,50 @@ static int rk817_charge_parse_dt(struct rk817_charger *charge)
 }
 #endif
 
+#define PLUG_POLL_INTERVAL_MS	1000
+#define RK817_SYS_STS		0xf0
+#define RK817_PLUG_IN_STS_BIT	BIT(6)
+
+static void rk817_charge_plug_poll_work(struct work_struct *work)
+{
+	struct rk817_charger *charge = container_of(work,
+			struct rk817_charger, plug_poll_work.work);
+	unsigned int reg_val;
+	int plug_in_sts;
+	int ret;
+
+	/* Read RK817_SYS_STS directly without cache to get real hardware state */
+	ret = regmap_read(charge->regmap, RK817_SYS_STS, &reg_val);
+	if (ret) {
+		dev_err(charge->dev, "failed to read SYS_STS: %d\n", ret);
+		goto reschedule;
+	}
+
+	plug_in_sts = !!(reg_val & RK817_PLUG_IN_STS_BIT);
+
+	if (plug_in_sts != charge->last_plug_in_sts) {
+		charge->last_plug_in_sts = plug_in_sts;
+		if (plug_in_sts) {
+			dev_info(charge->dev, "charger plugged in (poll, reg=0x%x)\n", reg_val);
+			rk817_charge_set_chrg_param(charge, USB_TYPE_AC_CHARGER);
+		} else {
+			dev_info(charge->dev, "charger unplugged (poll, reg=0x%x)\n", reg_val);
+			rk817_charge_set_chrg_param(charge, USB_TYPE_NONE_CHARGER);
+			/*
+			 * Re-enable USB voltage/current limits so that charging
+			 * detection works when charger is plugged in again.
+			 * Write 0xdb directly: VLIM_EN=1, VLIM_SEL=5, ILIM_EN=1, ILIM_SEL=3
+			 */
+			regmap_write(charge->regmap, RK817_CHRG_IN, 0xdb);
+			dev_info(charge->dev, "reset CHRG_IN to 0xdb\n");
+		}
+	}
+
+reschedule:
+	schedule_delayed_work(&charge->plug_poll_work,
+			      msecs_to_jiffies(PLUG_POLL_INTERVAL_MS));
+}
+
 static void rk817_charge_irq_delay_work(struct work_struct *work)
 {
 	struct rk817_charger *charge = container_of(work,
@@ -1512,6 +1559,16 @@ static irqreturn_t rk817_plug_out_isr(int irq, void *cg)
 
 	charge = (struct rk817_charger *)cg;
 	charge->plugout_trigger = 1;
+
+	/*
+	 * For some reason the bits of RK817_CHRG_IN reset whenever the
+	 * power cord is unplugged. Re-enable USB voltage/current limits so
+	 * that charging detection works when charger is plugged in again.
+	 * Write 0xdb directly: VLIM_EN=1, VLIM_SEL=5, ILIM_EN=1, ILIM_SEL=3
+	 */
+	if (charge->charger_use_pmic_plug)
+		regmap_write(charge->regmap, RK817_CHRG_IN, 0xdb);
+
 	queue_delayed_work(charge->usb_charger_wq, &charge->irq_work,
 			   msecs_to_jiffies(10));
 
@@ -1649,6 +1706,26 @@ static int rk817_charge_probe(struct platform_device *pdev)
 		schedule_delayed_work(&charge->usb_work, 0);
 	}
 
+	charge->charger_use_pmic_plug =
+		of_property_read_bool(pdev->dev.of_node,
+				      "rockchip,charger-use-pmic-plug");
+	if (charge->charger_use_pmic_plug) {
+		/*
+		 * Initialize plug status polling. This handles cases where:
+		 * 1. Charger is already plugged in at boot (edge-triggered IRQ won't fire)
+		 * 2. IRQ masking issues prevent plug_in/plug_out interrupts from working
+		 */
+		charge->last_plug_in_sts = rk817_charge_get_plug_in_status(charge);
+		if (charge->last_plug_in_sts) {
+			dev_info(charge->dev, "charger already plugged in at boot\n");
+			rk817_charge_set_chrg_param(charge, USB_TYPE_AC_CHARGER);
+		}
+
+		INIT_DELAYED_WORK(&charge->plug_poll_work, rk817_charge_plug_poll_work);
+		schedule_delayed_work(&charge->plug_poll_work,
+				      msecs_to_jiffies(PLUG_POLL_INTERVAL_MS));
+	}
+
 	rk817_chage_debug(charge);
 	DBG("driver version: %s\n", CHARGE_DRIVER_VERSION);
 
@@ -1662,6 +1739,8 @@ irq_fail:
 	cancel_delayed_work_sync(&charge->usb_work);
 	cancel_delayed_work_sync(&charge->dc_work);
 	cancel_delayed_work_sync(&charge->irq_work);
+	if (charge->charger_use_pmic_plug)
+		cancel_delayed_work_sync(&charge->plug_poll_work);
 	destroy_workqueue(charge->usb_charger_wq);
 	destroy_workqueue(charge->dc_charger_wq);
 
@@ -1746,6 +1825,8 @@ static void rk817_charger_shutdown(struct platform_device *dev)
 	cancel_delayed_work_sync(&charge->usb_work);
 	cancel_delayed_work_sync(&charge->dc_work);
 	cancel_delayed_work_sync(&charge->irq_work);
+	if (charge->charger_use_pmic_plug)
+		cancel_delayed_work_sync(&charge->plug_poll_work);
 	flush_workqueue(charge->usb_charger_wq);
 	flush_workqueue(charge->dc_charger_wq);
 
