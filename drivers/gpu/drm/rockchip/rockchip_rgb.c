@@ -144,6 +144,11 @@ struct rockchip_rgb {
 	bool phy_enabled;
 	const struct rockchip_rgb_funcs *funcs;
 	struct rockchip_drm_sub_dev sub_dev;
+	/*
+	 * The bridge never turned up, so there is no RGB output to build and
+	 * nothing else in this struct was initialised.
+	 */
+	bool skipped;
 };
 
 static inline struct rockchip_rgb *connector_to_rgb(struct drm_connector *c)
@@ -890,6 +895,28 @@ static int rockchip_rgb_bind(struct device *dev, struct device *master,
 		ret = drm_of_find_panel_or_bridge(dev->of_node, 1, -1,
 						  &rgb->panel, &rgb->bridge);
 		if (ret) {
+			/*
+			 * With no bridge - unpopulated, damaged, or simply silent
+			 * on i2c - the lookup returns -EPROBE_DEFER. That used to
+			 * propagate and stall the DRM bind forever: the subsystem
+			 * comes up whole or not at all, so an RGB output nobody
+			 * needs took the working DSI panel down with it and the
+			 * screen stayed black from the moment the kernel started.
+			 *
+			 * While initcalls are still running, wait for the bridge as
+			 * before. Once the kernel has finished trying and it still
+			 * has not appeared, the helper stops answering "later" -
+			 * and we bind without the RGB output. All that is lost is
+			 * HDMI through that bridge.
+			 */
+			if (ret == -EPROBE_DEFER &&
+			    driver_deferred_probe_check_state(dev) != -EPROBE_DEFER) {
+				DRM_DEV_ERROR(dev,
+					      "no panel or bridge, RGB output disabled\n");
+				rgb->skipped = true;
+				return 0;
+			}
+
 			DRM_DEV_ERROR(dev, "failed to find panel or bridge: %d\n", ret);
 			return ret;
 		}
@@ -967,6 +994,10 @@ static void rockchip_rgb_unbind(struct device *dev, struct device *master,
 				void *data)
 {
 	struct rockchip_rgb *rgb = dev_get_drvdata(dev);
+
+	/* bind returned early: no encoder and no connector were ever created */
+	if (rgb->skipped)
+		return;
 
 	if (rgb->sub_dev.connector)
 		rockchip_drm_unregister_sub_dev(&rgb->sub_dev);
