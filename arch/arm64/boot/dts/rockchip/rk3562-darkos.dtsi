@@ -351,9 +351,18 @@
 		 * pinctrl-0 are set per-device.
 		 */
 
+		/*
+		 * Display off, 128 ms, sleep in, 30 ms - the delays every stock
+		 * tree has (flash-v10, flash-v14, the vendor ro520c v10/v14
+		 * Linux trees). The tree this was derived from had none, and
+		 * panel-simple then asserted reset and cut the supply straight
+		 * after the commands. Off and on again quickly like that, the
+		 * panel stays black with the backlight on; with the delays, a
+		 * 41 ms off/on brings the picture back.
+		 */
 		panel-exit-sequence = [
-			05 00 01 28
-			05 00 01 10
+			05 80 01 28
+			05 1e 01 10
 		];
 
 		disp_timings0: display-timings {
