@@ -555,13 +555,17 @@
 		     &i2s0m0_sdo0>;
 };
 
+/* RK628 HDMI audio (TX only). The vendor firmware uses the i2s1m1 group, GPIO3_B2..B5. The
+ * i2s1m0 group (GPIO3_C4..C7, ...) is also used by the RGB output as video data lines
+ * (rgb666_pins), so with it sai1 failed to probe ("pin gpio3-22 already requested by ...:rgb")
+ * and the "rockchip,hdmi-rk628" sound card was never created. */
 &sai1 {
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2s1m0_lrck
-		     &i2s1m0_sclk
-		     &i2s1m0_sdi0
-		     &i2s1m0_sdo0>;
+	pinctrl-0 = <&i2s1m1_mclk
+		     &i2s1m1_sclk
+		     &i2s1m1_lrck
+		     &i2s1m1_sdo0>;
 };
 
 &saradc0 {
