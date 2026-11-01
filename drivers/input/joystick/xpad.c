@@ -1528,6 +1528,31 @@ static int xpad_start_input(struct usb_xpad *xpad)
 	if (usb_submit_urb(xpad->irq_in, GFP_KERNEL))
 		return -EIO;
 
+	if (xpad->xtype == XTYPE_XBOX360) {
+		/*
+		 * Some third-party Xbox 360-style controllers send no input
+		 * until the host reads this vendor string, as Windows' driver
+		 * does (a ShanWan pad in its 360 mode, 045e:028e, stayed
+		 * silent). Backported from upstream xpad; a pad that does not
+		 * answer only gets a warning.
+		 */
+		u8 dummy[20];
+
+		error = usb_control_msg_recv(xpad->udev, 0,
+					     /* bRequest */ 0x01,
+					     /* bmRequestType */
+					     USB_TYPE_VENDOR | USB_DIR_IN |
+						USB_RECIP_INTERFACE,
+					     /* wValue */ 0x100,
+					     /* wIndex */ 0x00,
+					     dummy, sizeof(dummy),
+					     25, GFP_KERNEL);
+		if (error)
+			dev_warn(&xpad->dev->dev,
+				 "unable to receive magic message: %d\n",
+				 error);
+	}
+
 	if (xpad->xtype == XTYPE_XBOXONE) {
 		error = xpad_start_xbox_one(xpad);
 		if (error) {
