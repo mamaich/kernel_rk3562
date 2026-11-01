@@ -57,6 +57,17 @@
 /* Default debounce interval in ms -- silicone-dampened microswitches settle in 1-3ms */
 #define DEFAULT_DEBOUNCE_MS	5
 
+/*
+ * Select's release counts once it has stayed up this long; its press still comes
+ * at once. Its contact can open for tens of ms in the middle of a press (27 ms down,
+ * 57 ms up, 13 ms down, seen on the owner's console): reported as it came, that was
+ * two presses, and EmulationStation, which starts its screensaver on Select's
+ * release, put the screen out and lit it again at once. 100 ms is the vendor's
+ * debounce-interval for these keys. Not on Start: a release held back would merge
+ * a quick second press, and RetroArch quits on Home with Start pressed twice.
+ */
+#define SELECT_RELEASE_HOLD_MS	100
+
 /* Auto-calibration parameters */
 #define CALIBRATION_SAMPLES	16	/* readings to average at probe */
 #define CALIBRATION_DELAY_US	1000	/* 1ms between samples */
@@ -95,6 +106,10 @@ struct rk3562_gpio_btn {
 	int irq;
 	struct delayed_work work;
 	struct rk3562_joystick *joy;
+	/* a release counts once the button has stayed up this long (0: at once) */
+	unsigned int release_hold_ms;
+	unsigned long last_edge;	/* jiffies of the last edge, set by the IRQ */
+	bool reported;			/* the state last reported */
 };
 
 struct rk3562_joystick {
@@ -311,6 +326,20 @@ static void rk3562_gpio_work_func(struct work_struct *work)
 		return;
 	}
 
+	/* up after a reported press: report it once the line has had no edge for
+	 * the hold. Timed from the IRQ's last edge, so the order in which this and
+	 * the IRQ run changes nothing: a run too early only comes back later. */
+	if (!val && btn->reported && btn->release_hold_ms) {
+		unsigned long due = READ_ONCE(btn->last_edge) +
+				    msecs_to_jiffies(btn->release_hold_ms);
+
+		if (time_before(jiffies, due)) {
+			mod_delayed_work(system_wq, &btn->work, due - jiffies);
+			return;
+		}
+	}
+	btn->reported = val;
+
 	input_report_key(joy->input, btn->code, val);
 	input_sync(joy->input);
 }
@@ -320,6 +349,8 @@ static irqreturn_t rk3562_gpio_isr(int irq, void *data)
 	struct rk3562_gpio_btn *btn = data;
 	struct rk3562_joystick *joy = btn->joy;
 
+	/* any edge: a release being held back waits from this one */
+	WRITE_ONCE(btn->last_edge, jiffies);
 	mod_delayed_work(system_wq, &btn->work,
 			 msecs_to_jiffies(joy->debounce_ms));
 
@@ -967,6 +998,8 @@ static int rk3562_probe(struct platform_device *pdev)
 
 		btn->joy = joy;
 		btn->code = rk3562_remap_code(gpio_codes[i]);
+		if (btn->code == BTN_SELECT)
+			btn->release_hold_ms = SELECT_RELEASE_HOLD_MS;
 		INIT_DELAYED_WORK(&btn->work, rk3562_gpio_work_func);
 
 		btn->gpiod = devm_gpiod_get_index(dev, "key", i, GPIOD_IN);
