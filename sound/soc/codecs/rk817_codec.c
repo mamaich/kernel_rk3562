@@ -96,6 +96,8 @@ struct rk817_codec_priv {
 
 	bool out_l2spk_r2hp;
 	long int playback_path;
+	/* the DAC is unmuted: a stream plays (rk817_digital_mute_dac) */
+	bool dac_unmuted;
 	long int capture_path;
 
 	struct gpio_desc *spk_ctl_gpio;
@@ -133,6 +135,8 @@ struct rk817_codec_priv {
 
 	bool out_l2spk_r2hp;
 	long int playback_path;
+	/* the DAC is unmuted: a stream plays (rk817_digital_mute_dac) */
+	bool dac_unmuted;
 	long int capture_path;
 
 	struct gpio_desc *spk_ctl_gpio;
@@ -669,6 +673,43 @@ static SOC_ENUM_SINGLE_DECL(rk817_capture_path_type,
 static SOC_ENUM_SINGLE_DECL(rk817_resume_path_type,
 	0, 0, rk817_binary_mode);
 
+/*
+ * The amplifier GPIOs for the current playback path, as rk817_digital_mute_dac()
+ * sets them when a stream starts. A path switched while a stream plays (the
+ * headphones plugged in, and user space setting HP) changed the codec's registers
+ * but left the GPIOs as they were: on the RG52 Mini the speaker's amplifier, fed
+ * from the headphone output, kept playing beside the headphones.
+ */
+static void rk817_ctl_gpio_for_path(struct rk817_codec_priv *rk817)
+{
+	switch (rk817->playback_path) {
+	case OFF:
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_SPK, 0);
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_HP, 0);
+		break;
+	case RCV:
+	case SPK_PATH:
+	case RING_SPK:
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_HP, 0);
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_SPK, 1);
+		break;
+	case HP_PATH:
+	case HP_NO_MIC:
+	case RING_HP:
+	case RING_HP_NO_MIC:
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_SPK, 0);
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_HP, 1);
+		break;
+	case SPK_HP:
+	case RING_SPK_HP:
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_SPK, 1);
+		rk817_codec_ctl_gpio(rk817, CODEC_SET_HP, 1);
+		break;
+	default:
+		break;
+	}
+}
+
 static int rk817_playback_path_config(struct snd_soc_component *component,
 				      long pre_path, long target_path)
 {
@@ -832,6 +873,10 @@ static int rk817_playback_path_config(struct snd_soc_component *component,
 	default:
 		return -EINVAL;
 	}
+
+	/* while a stream plays, the amplifier follows the new path now */
+	if (rk817->dac_unmuted)
+		rk817_ctl_gpio_for_path(rk817);
 
 	return 0;
 }
@@ -1277,6 +1322,7 @@ static int rk817_digital_mute_dac(struct snd_soc_dai *dai, int mute, int stream)
 	struct rk817_codec_priv *rk817 = snd_soc_component_get_drvdata(component);
 
 	DBG("%s %d\n", __func__, mute);
+	rk817->dac_unmuted = !mute;
 
 	if (mute) {
 		rk817_codec_ctl_gpio(rk817, CODEC_SET_SPK, 0);
