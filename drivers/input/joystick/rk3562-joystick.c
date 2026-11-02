@@ -78,8 +78,11 @@
 /* Trigger: consistent fully-pressed floor (in microvolts) */
 #define TRIG_MIN_UV		11000	/* 11mV observed */
 /* Trigger: dead zone near rest -- suppress noise below this output value.
- * L2 noise peaks at ~536, R2 at ~77 on 0-32767 scale. 800 gives margin. */
-#define TRIG_DZ_OUTPUT		800
+ * L2 noise peaks at ~536, R2 at ~77 on 0-32767 scale, measured at rest.
+ * dArkOS: 800 was not enough under load: with Guitar Hero starting, L2
+ * untouched gave 878 for 21 ms, and ARMSX2 takes any value as L2 pressed
+ * (users saw L2 pressed by itself). Doubled to 1600 (~5% of the travel). */
+#define TRIG_DZ_OUTPUT		1600
 /* Trigger: calibrated fuzz/flat (much smaller than pre-calibration values) */
 #define TRIG_FLAT_CALIBRATED	512
 #define TRIG_FUZZ_CALIBRATED	64
