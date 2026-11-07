@@ -5592,6 +5592,18 @@ static void vop2_win_atomic_update(struct vop2_win *win, struct drm_rect *src, s
 	VOP_WIN_SET(vop2, win, yrgb_mst, yrgb_mst);
 
 	rb_swap = vop2_win_rb_swap(fb->format->format);
+	/*
+	 * RK3562 takes 24-bit RGB with its bytes the other way round from the
+	 * RK3568, the order VOP1's full framework (IP 3.x) has: RGB888 needs the
+	 * swap and BGR888 none (has_rb_swapped() in rockchip_drm_vop.c). Without
+	 * this RG24 showed red and blue exchanged on the panel: retrorun's Crazy
+	 * Taxi came out blue instead of yellow while a kmsgrab of the same buffer
+	 * was right.
+	 */
+	if (vop2->version == VOP_VERSION_RK3562 &&
+	    (fb->format->format == DRM_FORMAT_RGB888 ||
+	     fb->format->format == DRM_FORMAT_BGR888))
+		rb_swap = !rb_swap;
 	uv_swap = vop2_win_uv_swap(fb->format->format);
 	if (vpstate->tiled_en) {
 		uv_swap = 1;
