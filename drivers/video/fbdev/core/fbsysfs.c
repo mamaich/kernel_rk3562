@@ -203,6 +203,13 @@ static ssize_t show_modes(struct device *device, struct device_attribute *attr,
 	const struct fb_videomode *mode;
 
 	i = 0;
+	if ((fb_info->flags & FBINFO_MISC_SHOW_BOOT_MODE) &&
+	    !list_empty(&fb_info->modelist)) {
+		/* registered first, so last: fb_add_videomode() adds at the head */
+		modelist = list_last_entry(&fb_info->modelist,
+					   struct fb_modelist, list);
+		return mode_string(buf, 0, &modelist->mode);
+	}
 	list_for_each(pos, &fb_info->modelist) {
 		modelist = list_entry(pos, struct fb_modelist, list);
 		mode = &modelist->mode;

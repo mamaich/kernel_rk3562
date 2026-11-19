@@ -30,6 +30,8 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/console.h>
+#include <linux/fb.h>
+#include <linux/fbcon.h>
 #include <linux/dma-buf.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -59,6 +61,36 @@ module_param(drm_fbdev_overalloc, int, 0444);
 MODULE_PARM_DESC(drm_fbdev_overalloc,
 		 "Overallocation of the fbdev buffer (%) [default="
 		 __MODULE_STRING(CONFIG_DRM_FBDEV_OVERALLOC) "]");
+
+/*
+ * A device whose outputs have different shapes (the RG52 Mini: a 720x1280
+ * portrait panel and a 1920x1080 TV, one at a time) needs an fbdev buffer that
+ * fits both. Made for the output found at boot, the console could not be shown
+ * on the other: drm_client_modeset_probe() drops each mode larger than the
+ * buffer, and the CRTC was left with no plane. With both set, the buffer is at
+ * least this big and the console takes the size of the output in use at each
+ * hotplug; what userspace reads of fbdev stays as it was: the virtual size is
+ * the visible size, and /sys/class/graphics/fb0/modes shows only the mode found
+ * at boot.
+ */
+static int drm_fbdev_min_width = CONFIG_DRM_FBDEV_MIN_WIDTH;
+module_param(drm_fbdev_min_width, int, 0444);
+MODULE_PARM_DESC(drm_fbdev_min_width,
+		 "Minimum width of the fbdev buffer; with drm_fbdev_min_height the console follows the output in use [default="
+		 __MODULE_STRING(CONFIG_DRM_FBDEV_MIN_WIDTH) "]");
+
+static int drm_fbdev_min_height = CONFIG_DRM_FBDEV_MIN_HEIGHT;
+module_param(drm_fbdev_min_height, int, 0444);
+MODULE_PARM_DESC(drm_fbdev_min_height,
+		 "Minimum height of the fbdev buffer [default="
+		 __MODULE_STRING(CONFIG_DRM_FBDEV_MIN_HEIGHT) "]");
+
+static bool drm_fbdev_follow_output(void)
+{
+	return drm_fbdev_min_width > 0 && drm_fbdev_min_height > 0;
+}
+
+static void drm_fb_helper_follow_work(struct work_struct *work);
 
 /*
  * In order to keep user-space compatibility, we want in certain use-cases
@@ -459,6 +491,7 @@ void drm_fb_helper_prepare(struct drm_device *dev, struct drm_fb_helper *helper,
 	spin_lock_init(&helper->dirty_lock);
 	INIT_WORK(&helper->resume_work, drm_fb_helper_resume_worker);
 	INIT_WORK(&helper->dirty_work, drm_fb_helper_dirty_work);
+	INIT_WORK(&helper->follow_work, drm_fb_helper_follow_work);
 	helper->dirty_clip.x1 = helper->dirty_clip.y1 = ~0;
 	mutex_init(&helper->lock);
 	helper->funcs = funcs;
@@ -596,6 +629,7 @@ void drm_fb_helper_fini(struct drm_fb_helper *fb_helper)
 
 	cancel_work_sync(&fb_helper->resume_work);
 	cancel_work_sync(&fb_helper->dirty_work);
+	cancel_work_sync(&fb_helper->follow_work);
 
 	info = fb_helper->fbdev;
 	if (info) {
@@ -1299,8 +1333,13 @@ int drm_fb_helper_check_var(struct fb_var_screeninfo *var,
 		return -EINVAL;
 	}
 
-	var->xres_virtual = fb->width;
-	var->yres_virtual = fb->height;
+	if (drm_fbdev_follow_output()) {
+		var->xres_virtual = var->xres;
+		var->yres_virtual = var->yres;
+	} else {
+		var->xres_virtual = fb->width;
+		var->yres_virtual = fb->height;
+	}
 
 	/*
 	 * Workaround for SDL 1.2, which is known to be setting all pixel format
@@ -1639,6 +1678,15 @@ static int drm_fb_helper_single_fb_probe(struct drm_fb_helper *fb_helper,
 	sizes.surface_height *= drm_fbdev_overalloc;
 	sizes.surface_height /= 100;
 
+	if (drm_fbdev_follow_output()) {
+		sizes.surface_width = max_t(u32, sizes.surface_width,
+					    min_t(u32, drm_fbdev_min_width,
+						  dev->mode_config.max_width));
+		sizes.surface_height = max_t(u32, sizes.surface_height,
+					     min_t(u32, drm_fbdev_min_height,
+						   dev->mode_config.max_height));
+	}
+
 	/* push down into drivers */
 	ret = (*fb_helper->funcs->fb_probe)(fb_helper, &sizes);
 	if (ret < 0)
@@ -1686,6 +1734,11 @@ static void drm_fb_helper_fill_var(struct fb_info *info,
 
 	info->var.xres = fb_width;
 	info->var.yres = fb_height;
+
+	if (drm_fbdev_follow_output()) {
+		info->var.xres_virtual = fb_width;
+		info->var.yres_virtual = fb_height;
+	}
 }
 
 /**
@@ -1714,6 +1767,9 @@ void drm_fb_helper_fill_info(struct fb_info *info,
 	info->par = fb_helper;
 	snprintf(info->fix.id, sizeof(info->fix.id), "%sdrmfb",
 		 fb_helper->dev->driver->name);
+
+	if (drm_fbdev_follow_output())
+		info->flags |= FBINFO_MISC_SHOW_BOOT_MODE;
 
 }
 EXPORT_SYMBOL(drm_fb_helper_fill_info);
@@ -1899,6 +1955,64 @@ int drm_fb_helper_initial_config(struct drm_fb_helper *fb_helper, int bpp_sel)
 }
 EXPORT_SYMBOL(drm_fb_helper_initial_config);
 
+/*
+ * The console takes the size of the output the last probe chose (the first
+ * modeset with a mode: one output at a time here), if the buffer holds it.
+ * Queued by drm_fb_helper_hotplug_event(); the console lock is taken here, as
+ * that may run with it held (a restore from fbcon, with a delayed hotplug).
+ */
+static void drm_fb_helper_follow_work(struct work_struct *work)
+{
+	struct drm_fb_helper *fb_helper = container_of(work, struct drm_fb_helper,
+						       follow_work);
+	struct drm_client_dev *client = &fb_helper->client;
+	struct fb_info *info = fb_helper->fbdev;
+	struct drm_framebuffer *fb = fb_helper->fb;
+	struct drm_mode_set *modeset;
+	u32 w = 0, h = 0;
+
+	if (!info || !fb)
+		return;
+
+	mutex_lock(&client->modeset_mutex);
+	drm_client_for_each_modeset(modeset, client) {
+		if (modeset->mode && modeset->num_connectors) {
+			w = modeset->mode->hdisplay;
+			h = modeset->mode->vdisplay;
+			break;
+		}
+	}
+	mutex_unlock(&client->modeset_mutex);
+
+	if (!w || !h || w > fb->width || h > fb->height)
+		return;
+
+	console_lock();
+	lock_fb_info(info);
+	if (w != info->var.xres || h != info->var.yres) {
+		struct fb_var_screeninfo old = info->var;
+		struct fb_videomode mode;
+
+		info->var.xres = w;
+		info->var.yres = h;
+		info->var.xres_virtual = w;
+		info->var.yres_virtual = h;
+		info->var.xoffset = 0;
+		info->var.yoffset = 0;
+		/* fbcon keeps each console's mode as a pointer into the mode list */
+		fb_var_to_videomode(&mode, &info->var);
+		if (fb_add_videomode(&mode, &info->modelist)) {
+			info->var = old;
+		} else {
+			drm_info(fb_helper->dev, "fbdev: the console follows the output, %ux%u -> %ux%u\n",
+				 old.xres, old.yres, w, h);
+			fbcon_fb_resized(info);
+		}
+	}
+	unlock_fb_info(info);
+	console_unlock();
+}
+
 /**
  * drm_fb_helper_hotplug_event - respond to a hotplug notification by
  *                               probing all the outputs attached to the fb
@@ -1947,6 +2061,9 @@ int drm_fb_helper_hotplug_event(struct drm_fb_helper *fb_helper)
 	drm_client_modeset_probe(&fb_helper->client, fb_helper->fb->width, fb_helper->fb->height);
 	drm_setup_crtcs_fb(fb_helper);
 	mutex_unlock(&fb_helper->lock);
+
+	if (drm_fbdev_follow_output())
+		schedule_work(&fb_helper->follow_work);
 
 	drm_fb_helper_set_par(fb_helper->fbdev);
 

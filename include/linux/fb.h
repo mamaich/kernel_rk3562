@@ -433,6 +433,14 @@ struct fb_tile_ops {
  */
 #define FBINFO_HIDE_SMEM_START  0x200000
 
+/*
+ * /sys/class/graphics/fbN/modes shows only the mode registered with the fb
+ * (the one found at boot), not those added to the list since: the driver
+ * changes the screen's size by itself (drm fbdev emulation following the
+ * output in use), and scripts read that file as the screen's size, one line.
+ */
+#define FBINFO_MISC_SHOW_BOOT_MODE 0x400000
+
 
 struct fb_info {
 	atomic_t count;

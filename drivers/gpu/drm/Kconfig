@@ -156,6 +156,26 @@ config DRM_FBDEV_OVERALLOC
 	  is 100. Typical values for double buffering will be 200,
 	  triple buffering 300.
 
+config DRM_FBDEV_MIN_WIDTH
+	int "Minimum width of the fbdev buffer"
+	depends on DRM_FBDEV_EMULATION
+	default 0
+	help
+	  Makes the fbdev buffer at least this wide, and at least
+	  DRM_FBDEV_MIN_HEIGHT high, so that the modes of outputs of
+	  different shapes fit in it (a portrait panel and a TV, one at a
+	  time). With both set, the console also takes the size of the
+	  output in use at each hotplug, its virtual size stays its visible
+	  size, and /sys/class/graphics/fbN/modes still shows only the mode
+	  found at boot. 0 (the default) leaves all of this off.
+
+config DRM_FBDEV_MIN_HEIGHT
+	int "Minimum height of the fbdev buffer"
+	depends on DRM_FBDEV_EMULATION
+	default 0
+	help
+	  See DRM_FBDEV_MIN_WIDTH.
+
 config DRM_FBDEV_LEAK_PHYS_SMEM
 	bool "Shamelessly allow leaking of fbdev physical address (DANGEROUS)"
 	depends on DRM_FBDEV_EMULATION && EXPERT

@@ -137,6 +137,15 @@ struct drm_fb_helper {
 	struct work_struct resume_work;
 
 	/**
+	 * @follow_work:
+	 *
+	 * Gives the console the size of the output in use after a hotplug
+	 * (CONFIG_DRM_FBDEV_MIN_WIDTH and _HEIGHT). A work, since the console
+	 * lock may be held where the hotplug is handled.
+	 */
+	struct work_struct follow_work;
+
+	/**
 	 * @lock:
 	 *
 	 * Top-level FBDEV helper lock. This protects all internal data

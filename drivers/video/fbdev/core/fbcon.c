@@ -2777,6 +2777,60 @@ void fbcon_update_vcs(struct fb_info *info, bool all)
 }
 EXPORT_SYMBOL(fbcon_update_vcs);
 
+/*
+ * The fb's driver changed info->var's size by itself (drm fbdev emulation
+ * following the output in use). Every console on the fb takes it, those in
+ * graphics mode as well: fbcon_set_all_vcs() skips them, and fbcon_switch()
+ * would later put their stored, old size back on the fb. Called with the
+ * console lock held.
+ */
+void fbcon_fb_resized(struct fb_info *info)
+{
+	struct fbcon_ops *ops = info->fbcon_par;
+	struct fbcon_display *p;
+	struct vc_data *vc;
+	int i, rows, cols, fg = -1;
+
+	WARN_CONSOLE_UNLOCKED();
+
+	if (!ops || ops->currcon < 0)
+		return;
+
+	/* each console keeps its mode as a pointer into the mode list */
+	if (WARN_ON(!fb_match_mode(&info->var, &info->modelist)))
+		return;
+
+	for (i = first_fb_vc; i <= last_fb_vc; i++) {
+		vc = vc_cons[i].d;
+		if (!vc || registered_fb[con2fb_map[i]] != info)
+			continue;
+
+		if (con_is_visible(vc) && vc->vc_mode == KD_TEXT) {
+			fg = i;
+			continue;
+		}
+
+		p = &fb_display[vc->vc_num];
+		set_blitting_type(vc, info);
+		var_to_display(p, &info->var, info);
+		cols = FBCON_SWAP(ops->rotate, info->var.xres, info->var.yres);
+		rows = FBCON_SWAP(ops->rotate, info->var.yres, info->var.xres);
+		cols /= vc->vc_font.width;
+		rows /= vc->vc_font.height;
+		vc_resize(vc, cols, rows);
+	}
+
+	if (fg != -1) {
+		fbcon_modechanged(info);
+	} else {
+		/* set_blitting_type() above pointed ops at the last console */
+		vc = vc_cons[ops->currcon].d;
+		if (vc && registered_fb[con2fb_map[ops->currcon]] == info)
+			set_blitting_type(vc, info);
+	}
+}
+EXPORT_SYMBOL(fbcon_fb_resized);
+
 /* let fbcon check if it supports a new screen resolution */
 int fbcon_modechange_possible(struct fb_info *info, struct fb_var_screeninfo *var)
 {
