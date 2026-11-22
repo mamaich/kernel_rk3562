@@ -1008,6 +1008,16 @@ static int rk817_charge_init_dc(struct rk817_charger *charge)
 	return 0;
 }
 
+/*
+ * dArkOS: rk817_bc_fallback says the DC state was set by the fallback for a
+ * charger with no BC type (rk817_charger_evt_worker()), not by a DC adapter
+ * (the RG52 Mini has none);
+ * rk817_bc_tries counts the charger worker's second looks for a type while
+ * VBUS is in. One RK817 on the board.
+ */
+static int rk817_bc_fallback;
+static int rk817_bc_tries;
+
 static void rk817_charge_host_evt_worker(struct work_struct *work)
 {
 	struct rk817_charger *charge = container_of(work,
@@ -1017,6 +1027,21 @@ static void rk817_charge_host_evt_worker(struct work_struct *work)
 	/* Determine cable/charger type */
 	if (extcon_get_state(edev, EXTCON_USB_VBUS_EN) > 0) {
 		DBG("receive type-c notifier event: OTG ON...\n");
+		if (!charge->otg_in && rk817_charge_get_plug_in_status(charge)) {
+			/*
+			 * RG52 Mini (dArkOS): the PHY asks for VBUS whenever the port
+			 * is the USB host, also when a powered hub (or a PD charger
+			 * that also takes data) supplies VBUS already, the console
+			 * its sink. The boost then ran into the source's VBUS, and
+			 * charging could feed on the console's own battery. With
+			 * VBUS in before it was asked for, the boost stays off and
+			 * otg_in offline (the plug interrupts stay on, nothing
+			 * boosts in sleep); the charger worker looks at the type.
+			 */
+			DBG("VBUS from outside: otg5v left off\n");
+			queue_delayed_work(charge->usb_charger_wq, &charge->usb_work, 0);
+			return;
+		}
 		if (charge->dc_in && charge->pdata->power_dc2otg) {
 			if (charge->otg_in)
 				rk817_charge_set_otg_state(charge,
@@ -1053,8 +1078,44 @@ static void rk817_charger_evt_worker(struct work_struct *work)
 	if (charger != USB_TYPE_UNKNOWN_CHARGER) {
 		DBG("receive type-c notifier event: %s...\n",
 		    event[charger]);
+		rk817_bc_tries = 0;
+		if (rk817_bc_fallback) {
+			/* the type came after all: the fallback's DC state goes */
+			rk817_bc_fallback = 0;
+			rk817_charge_set_chrg_param(charge, DC_TYPE_NONE_CHARGER);
+		}
 		charge->usb_charger = charger;
 		rk817_charge_set_chrg_param(charge, charger);
+	} else if (rk817_charge_get_plug_in_status(charge) && !charge->otg_in) {
+		/*
+		 * VBUS in, not the console's own boost, and no BC type: mostly
+		 * a PD or vendor charger the legacy BC detection does not know,
+		 * or a powered hub with the port as the USB host. Charge from
+		 * it as from a DC charger at a careful current
+		 * (lcdyk0517/3562.bsp.5.10 ebce8f4). The PHY's BC detection
+		 * may not be done yet (0.1-2.3 s after the plug, seen on an
+		 * RG52 Mini), so look again four times, a second apart, before
+		 * falling back: a fallback taken too early left a computer's USB
+		 * port (SDP) at 1.5 A until its type came.
+		 */
+		if (rk817_bc_tries < 4) {
+			rk817_bc_tries++;
+			queue_delayed_work(charge->usb_charger_wq, &charge->usb_work,
+					   msecs_to_jiffies(1000));
+		} else if (!charge->dc_in) {
+			/* dc_in: only the fallback sets it here (no DC jack) */
+			DBG("pmic plug without BC type: fallback DC charger\n");
+			rk817_charge_set_chrg_param(charge, DC_TYPE_DC_CHARGER);
+			rk817_charge_set_input_current(charge, INPUT_1500MA);
+			rk817_bc_fallback = 1;
+		}
+	} else if (!rk817_charge_get_plug_in_status(charge)) {
+		/* No VBUS and no type any more: nothing in, whatever was before */
+		DBG("receive type-c notifier event: no charger, no VBUS\n");
+		rk817_bc_tries = 0;
+		rk817_bc_fallback = 0;
+		rk817_charge_set_chrg_param(charge, USB_TYPE_NONE_CHARGER);
+		rk817_charge_set_chrg_param(charge, DC_TYPE_NONE_CHARGER);
 	}
 }
 
@@ -1064,6 +1125,23 @@ static void rk817_charge_discnt_evt_worker(struct work_struct *work)
 			struct rk817_charger, discnt_work.work);
 
 	if (extcon_get_state(charge->cable_edev, EXTCON_USB) == 0) {
+		/*
+		 * RG52 Mini (dArkOS): EXTCON_USB is the data line, which a
+		 * dedicated charger (DCP) never has, and the type-c side
+		 * toggles it while it tries PD with a charger that has none
+		 * (twice, a second apart, after the DCP was found). Each change
+		 * came here and put the charger back to none (450 mA, not
+		 * charging) with the charger still in. While the PMIC still
+		 * sees VBUS, look at the charger's type again a little later
+		 * instead: a real unplug has dropped VBUS by then, and the
+		 * charger worker sets none itself.
+		 */
+		if (rk817_charge_get_plug_in_status(charge)) {
+			DBG("receive type-c notifier event: DISCNT with VBUS in, type looked at again\n");
+			queue_delayed_work(charge->usb_charger_wq, &charge->usb_work,
+					   msecs_to_jiffies(500));
+			return;
+		}
 		DBG("receive type-c notifier event: DISCNT...\n");
 
 		rk817_charge_set_chrg_param(charge, USB_TYPE_NONE_CHARGER);
@@ -1487,8 +1565,20 @@ static void rk817_charge_irq_delay_work(struct work_struct *work)
 	} else if (charge->plugout_trigger) {
 		DBG("pmic: plug out\n");
 		charge->plugout_trigger = 0;
+		rk817_bc_tries = 0;
+		rk817_bc_fallback = 0;
 		rk817_charge_set_chrg_param(charge, USB_TYPE_NONE_CHARGER);
 		rk817_charge_set_chrg_param(charge, DC_TYPE_NONE_CHARGER);
+		/*
+		 * dArkOS: a PD source (a powered hub at boot) drops VBUS for a
+		 * moment on a hard reset, and the plug-in interrupt did not
+		 * follow: the charger stayed at none with VBUS back. Look at
+		 * the type again once VBUS had time to come back; after a real
+		 * unplug the charger worker finds none and keeps none.
+		 */
+		if (charge->pdata->extcon)
+			queue_delayed_work(charge->usb_charger_wq, &charge->usb_work,
+					   msecs_to_jiffies(1500));
 	} else {
 		DBG("pmic: unknown irq\n");
 	}
