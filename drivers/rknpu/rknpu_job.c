@@ -146,8 +146,11 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
 	atomic_set(&job->run_count, job->use_core_num);
 	atomic_set(&job->interrupt_count, job->use_core_num);
 	job->iommu_domain_id = args->iommu_domain_id;
-	for (i = 0; i < rknpu_dev->config->num_irqs; i++)
+	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
 		atomic_set(&job->submit_count[i], 0);
+		/* dArkOS: rknpu_job_abort() takes a job off a queue it may still be on */
+		INIT_LIST_HEAD(&job->head[i]);
+	}
 #ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
 	task_obj = (struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
 	if (task_obj)
@@ -228,7 +231,7 @@ static inline int rknpu_job_wait(struct rknpu_job *job)
 			list_for_each_entry_safe(
 				entry, q, &subcore_data->todo_list, head[i]) {
 				if (entry == job) {
-					list_del(&job->head[i]);
+					list_del_init(&job->head[i]);
 					break;
 				}
 			}
@@ -578,6 +581,16 @@ static void rknpu_job_abort(struct rknpu_job *job)
 				subcore_data->task_num -=
 					rknpu_get_task_number(job, i);
 			}
+			/*
+			 * dArkOS: a job never committed is still on the core's
+			 * queue; it is freed below, and the next submit would
+			 * commit it from there.
+			 */
+			if (!list_empty(&job->head[i])) {
+				list_del_init(&job->head[i]);
+				subcore_data->task_num -=
+					rknpu_get_task_number(job, i);
+			}
 		}
 	}
 	spin_unlock_irqrestore(&rknpu_dev->irq_lock, flags);
@@ -671,6 +684,14 @@ static inline irqreturn_t rknpu_irq_handler(int irq, void *data, int core_index)
 			(REG_READ(rknpu_dev->config->pc_task_status_offset) &
 			 rknpu_dev->config->pc_task_number_mask));
 		REG_WRITE(RKNPU_INT_CLEAR, RKNPU_OFFSET_INT_CLEAR);
+		/*
+		 * dArkOS: done with the job here. Left true, a timeout's
+		 * rknpu_job_abort() keeps the core pointing at the job it
+		 * frees, and the next submit commits freed memory.
+		 */
+		spin_lock_irqsave(&rknpu_dev->irq_lock, flags);
+		job->irq_entry[core_index] = false;
+		spin_unlock_irqrestore(&rknpu_dev->irq_lock, flags);
 		return IRQ_HANDLED;
 	}
 
