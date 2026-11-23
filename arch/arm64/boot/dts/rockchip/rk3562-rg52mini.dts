@@ -444,3 +444,27 @@
 		opp-microvolt-L4 = <975000 975000 1000000>;
 	};
 };
+
+/* The NPU, for dArkOS's NPU UPSCALE (ESPCN in the Vulkan rotate layer), as on
+ * the Rockchip reference boards. vdd_npu is a PWM DC-DC on pwm6 (GPIO0_C1,
+ * nothing else uses that pin). No always-on/boot-on: nothing enables the
+ * PWM during boot (pwm-rockchip muxes the pin only when the PWM is on), so
+ * boot does not depend on the NPU rail; rknpu.ko enables vdd_npu itself.
+ * rknpu is a module the image keeps from loading at boot (modprobe.d
+ * blacklist); a game started with NPU UPSCALE on loads it. */
+&pwm6 {
+	status = "okay";
+};
+
+&vdd_npu {
+	status = "okay";
+};
+
+&rknpu {
+	rknpu-supply = <&vdd_npu>;
+	status = "okay";
+};
+
+&rknpu_mmu {
+	status = "okay";
+};
