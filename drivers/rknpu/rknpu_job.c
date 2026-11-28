@@ -8,6 +8,10 @@
 #include <linux/delay.h>
 #include <linux/sync_file.h>
 #include <linux/io.h>
+#include <linux/interrupt.h>
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+#include <drm/drm_file.h>
+#endif
 
 #include "rknpu_ioctl.h"
 #include "rknpu_drv.h"
@@ -125,14 +129,46 @@ static void rknpu_job_cleanup_work(struct work_struct *work)
 	rknpu_job_cleanup(job);
 }
 
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+/*
+ * dArkOS: the task buffer of a submit is given as the kernel address of its GEM
+ * object (RKNPU_MEM_CREATE's obj_addr). Taken as it came, a submit after the
+ * program had freed that buffer (a thread still submitting while another tore
+ * the context down: 2026-11-24) took a reference on freed memory ("refcount_t:
+ * addition on 0; use-after-free") and committed a NULL kv_addr. It has to be
+ * one of this file's own objects, and the reference is taken while its handle
+ * still holds one, under the handle table's lock. NULL when it is not.
+ */
+static struct rknpu_gem_object *rknpu_task_obj_get(struct drm_file *file_priv,
+						   __u64 addr)
+{
+	struct rknpu_gem_object *found = NULL;
+	struct drm_gem_object *obj;
+	int id;
+
+	if (!file_priv)
+		return NULL;
+
+	spin_lock(&file_priv->table_lock);
+	idr_for_each_entry(&file_priv->object_idr, obj, id) {
+		if ((__u64)(uintptr_t)to_rknpu_obj(obj) == addr) {
+			found = to_rknpu_obj(obj);
+			rknpu_gem_object_get(obj);
+			break;
+		}
+	}
+	spin_unlock(&file_priv->table_lock);
+
+	return found;
+}
+#endif
+
+/* dArkOS: the task object's reference is taken by rknpu_submit() (rknpu_task_obj_get) */
 static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
 						struct rknpu_submit *args)
 {
 	struct rknpu_job *job = NULL;
 	int i = 0;
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	struct rknpu_gem_object *task_obj = NULL;
-#endif
 
 	job = kzalloc(sizeof(*job), GFP_KERNEL);
 	if (!job)
@@ -151,11 +187,6 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
 		/* dArkOS: rknpu_job_abort() takes a job off a queue it may still be on */
 		INIT_LIST_HEAD(&job->head[i]);
 	}
-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
-	task_obj = (struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
-	if (task_obj)
-		rknpu_gem_object_get(&task_obj->base);
-#endif
 
 	if (!(args->flags & RKNPU_JOB_NONBLOCK)) {
 		job->args = args;
@@ -595,6 +626,32 @@ static void rknpu_job_abort(struct rknpu_job *job)
 	}
 	spin_unlock_irqrestore(&rknpu_dev->irq_lock, flags);
 
+	/*
+	 * dArkOS: a core whose interrupt handler had the job (irq_entry set) was
+	 * left pointing at it above. The handler works on the job with irq_lock
+	 * dropped, so it may still be running: let it finish before the job is
+	 * freed, then take the core off the job if it still points at it (the
+	 * handler's error path leaves it so). Otherwise the core kept a freed job:
+	 * the busy timer wrote into it every second, nothing was committed again
+	 * and NPU UPSCALE stopped until a reboot (the review of 2026-11-28).
+	 */
+	for (i = 0; i < rknpu_dev->config->num_irqs; i++)
+		if ((job->args->core_mask & rknpu_core_mask(i)) &&
+		    rknpu_dev->irq[i] > 0)
+			synchronize_irq(rknpu_dev->irq[i]);
+	spin_lock_irqsave(&rknpu_dev->irq_lock, flags);
+	for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
+		if (job->args->core_mask & rknpu_core_mask(i)) {
+			subcore_data = &rknpu_dev->subcore_datas[i];
+			if (job == subcore_data->job) {
+				subcore_data->job = NULL;
+				subcore_data->task_num -=
+					rknpu_get_task_number(job, i);
+			}
+		}
+	}
+	spin_unlock_irqrestore(&rknpu_dev->irq_lock, flags);
+
 	if (job->ret == -ETIMEDOUT) {
 		LOG_ERROR("job timeout, flags: %#x:\n", job->flags);
 		for (i = 0; i < rknpu_dev->config->num_irqs; i++) {
@@ -764,10 +821,18 @@ static void rknpu_job_timeout_clean(struct rknpu_device *rknpu_dev,
 	}
 }
 
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+static int rknpu_submit(struct rknpu_device *rknpu_dev,
+			struct rknpu_submit *args, struct drm_file *file_priv)
+#else
 static int rknpu_submit(struct rknpu_device *rknpu_dev,
 			struct rknpu_submit *args)
+#endif
 {
 	struct rknpu_job *job = NULL;
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+	struct rknpu_gem_object *task_obj = NULL;
+#endif
 	int ret = -EINVAL;
 
 	if (args->task_number == 0) {
@@ -780,8 +845,24 @@ static int rknpu_submit(struct rknpu_device *rknpu_dev,
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+	/* dArkOS: only a task object of this file, with a reference (rknpu_task_obj_get) */
+	if (args->task_obj_addr) {
+		task_obj = rknpu_task_obj_get(file_priv, args->task_obj_addr);
+		if (!task_obj) {
+			LOG_ERROR("invalid task object: %#llx\n",
+				  (unsigned long long)args->task_obj_addr);
+			return -EINVAL;
+		}
+	}
+#endif
+
 	job = rknpu_job_alloc(rknpu_dev, args);
 	if (!job) {
+#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
+		if (task_obj)
+			rknpu_gem_object_put(&task_obj->base);
+#endif
 		LOG_ERROR("failed to allocate rknpu job!\n");
 		return -ENOMEM;
 	}
@@ -873,7 +954,7 @@ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
 	struct rknpu_device *rknpu_dev = dev_get_drvdata(dev->dev);
 	struct rknpu_submit *args = data;
 
-	return rknpu_submit(rknpu_dev, args);
+	return rknpu_submit(rknpu_dev, args, file_priv);
 }
 #endif
 

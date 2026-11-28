@@ -1126,6 +1126,7 @@ static int rknpu_register_irq(struct platform_device *pdev,
 					      config->irqs[i].name, ret);
 				return ret;
 			}
+			rknpu_dev->irq[i] = irq;	/* dArkOS: rknpu_job_abort() */
 		}
 	} else {
 		/* no irq names in dts */
@@ -1141,6 +1142,7 @@ static int rknpu_register_irq(struct platform_device *pdev,
 			LOG_DEV_ERROR(dev, "request irq failed: %d\n", ret);
 			return ret;
 		}
+		rknpu_dev->irq[0] = irq;	/* dArkOS: rknpu_job_abort() */
 	}
 #else
 	/* there are irq names in dts */
@@ -1162,6 +1164,7 @@ static int rknpu_register_irq(struct platform_device *pdev,
 				      config->irqs[i].name, ret);
 			return ret;
 		}
+		rknpu_dev->irq[i] = irq;	/* dArkOS: rknpu_job_abort() */
 	}
 #endif
 

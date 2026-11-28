@@ -123,6 +123,8 @@ struct rknpu_device {
 	atomic_t sequence;
 	spinlock_t lock;
 	spinlock_t irq_lock;
+	/* dArkOS: the cores' IRQs, for synchronize_irq() in rknpu_job_abort() */
+	int irq[RKNPU_MAX_CORES];
 	struct mutex power_lock;
 	struct mutex reset_lock;
 	struct mutex domain_lock;
